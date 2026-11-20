@@ -1,8 +1,8 @@
 # Software Requirements Specification (SRS)
-## System Name: DeltaMorph (Compiler-Verified Breaking-Change Healer)
+## System Name: DeltaMorph (Autonomous Breaking-Change Healer)
 
 **Document Version:** 2.3 (Production Hardened — All Operational Landmines Resolved)  
-**Lead Architect:** Uday Sharma ([@udaysharmadev](https://github.com/udaysharmadev))  
+**Architects:** Sumeet Kanhiya ([@sumeetkl11](https://github.com/sumeetkl11)) & Wahaj Khan  
 **Academic Affiliation:** Dawood University of Engineering & Technology (DUET)  
 **Target Environment:** Linux / macOS / Windows Developer Workstations & GitHub Actions  
 

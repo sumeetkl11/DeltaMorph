@@ -1,8 +1,8 @@
 # Implementation Roadmap, Tech Stack, Evaluation Protocol & Benchmarks
-## Project: DeltaMorph (Compiler-Verified Breaking-Change Healer)
+## Project: DeltaMorph (Autonomous Breaking-Change Healer)
 
 **Institution:** Dawood University of Engineering and Technology (DUET)  
-**Lead Developer:** Uday Sharma ([@udaysharmadev](https://github.com/udaysharmadev))  
+**Developers:** Sumeet Kanhiya ([@sumeetkl11](https://github.com/sumeetkl11)) & Wahaj Khan  
 **Document Version:** 2.3 (Production-Ready)  
 
 ---

@@ -1,9 +1,9 @@
 # Final Year Project (FYP) Proposal (Version 2.3 — Publication-Ready)
-## Project Title: DeltaMorph: Compiler-Verified Breaking-Change Healer via TypeScript Compiler API & AST-Guided Program Repair
+## Project Title: DeltaMorph: Autonomous Breaking-Change Healer
 
 **Department:** Computer Science  
 **Institution:** Dawood University of Engineering and Technology (DUET)  
-**Lead Developer:** Uday Sharma (GitHub: [@udaysharmadev](https://github.com/udaysharmadev))  
+**Developers:** Sumeet Kanhiya ([@sumeetkl11](https://github.com/sumeetkl11)) & Wahaj Khan  
 **Academic Year:** 6th - 8th Semester (Capstone Project)  
 
 ---

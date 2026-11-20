@@ -1,8 +1,8 @@
 # DeltaMorph: Defense Landmines & Viva Interrogation Guide
 
-**Author:** Uday Sharma ([@udaysharmadev](https://github.com/udaysharmadev))  
+**Authors:** Sumeet Kanhiya ([@sumeetkl11](https://github.com/sumeetkl11)) & Wahaj Khan  
 **Academic Institution:** Dawood University of Engineering & Technology (DUET), Department of Computer Science  
-**Project:** DeltaMorph — Compiler-Verified Breaking-Change Healer via TypeScript Compiler API & AST-Guided Program Repair  
+**Project:** DeltaMorph — Autonomous Breaking-Change Healer  
 **Document Purpose:** Master guide to ace the proposal defense, internal evaluations, and final external viva. Covers technical flaws, deep architectural comparisons, and rigorous defense strategies.
 
 ---

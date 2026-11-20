@@ -6,11 +6,10 @@
 ---
 
 ### Project Title
-**DeltaMorph: Compiler-Verified Breaking-Change Healer via TypeScript Compiler API & AST-Guided Program Repair**
+**DeltaMorph: Autonomous Breaking-Change Healer**
 
 ### Student Details
-* **Student Name:** Uday Sharma
-* **GitHub Profile:** [@udaysharmadev](https://github.com/udaysharmadev))
+* **Group Members:** Sumeet Kanhiya ([@sumeetkl11](https://github.com/sumeetkl11)) & Wahaj Khan
 * **Degree Program:** B.S. Computer Science (Final Year)
 * **Supervisor:** [Departmental Faculty Supervisor]
 
