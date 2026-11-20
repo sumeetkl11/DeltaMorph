@@ -1,149 +1,124 @@
-# DeltaMorph: Defense Landmines & Viva Interrogation Guide
+# DeltaMorph: Defense Landmines & Viva Interrogation Guide (Version 3.2)
 
-**Authors:** Sumeet Kanhiya ([@sumeetkl11](https://github.com/sumeetkl11)) & Wahaj Khan  
-**Academic Institution:** Dawood University of Engineering & Technology (DUET), Department of Computer Science  
-**Project:** DeltaMorph — Autonomous Breaking-Change Healer  
-**Document Purpose:** Master guide to ace the proposal defense, internal evaluations, and final external viva. Covers technical flaws, deep architectural comparisons, and rigorous defense strategies.
-
----
-
-## 1. The 6 Implementation Landmines & Their Concrete Solutions
-
-### Landmine 1: The Windows & Git Worktree `node_modules` Ghost Trap
-* **The Vulnerability:**  
-  When executing `git worktree add --detach .deltamorph-scratch HEAD`, git creates an isolated working copy containing only tracked repository files. Because `node_modules/` is git-ignored, the scratchpad directory has zero installed dependencies!
-  - Running `npm install` inside the worktree wastes 30–90 seconds per run, destroying our `<30s` latency target.
-  - Using standard filesystem symlinks (`ln -s` or `fs.symlinkSync(..., 'file')`) on Windows fails with `EPERM: operation not permitted` unless the developer runs the terminal as Administrator or has Windows Developer Mode enabled.
-* **The DeltaMorph Solution:**  
-  DeltaMorph detects the OS platform at runtime:
-  - On Linux / macOS: Creates standard symlinks.
-  - On Windows: Uses native **NTFS Directory Junctions** (`fs.symlinkSync(src, dest, 'junction')` or `mklink /J`). Junctions do NOT require administrator privileges on Windows and link instantaneously (0ms overhead).
+**Project Team:** Sumeet Kanhiya & Wahaj Khan  
+**Academic Institution:** Dawood University of Engineering & Technology (DUET), Karachi — Department of Computer Science  
+**Project:** DeltaMorph — Compiler-Verified Breaking-Change Healer via TypeScript Compiler API & AST-Guided Program Repair  
+**Document Purpose:** Technical defense playbook addressing 10 real implementation landmines, honest industry tool comparisons, and 12 external examiner trap questions.
 
 ---
 
-### Landmine 2: Multi-File Cascade Failure (Cycle Exhaustion)
-* **The Vulnerability:**  
-  A major dependency update (e.g., Axios v0.27 $\rightarrow$ v1.6 changing `AxiosResponse<T>` generics) often breaks 3 to 6 files across a repository simultaneously. If the repair budget is a flat "max 3 iterations", the LLM spends all 3 attempts fixing `src/api/user.ts` and runs out of budget before ever seeing `src/api/auth.ts` or `src/api/products.ts`.
-* **The DeltaMorph Solution:**  
-  A **Two-Tier Repair Loop Architecture**:
-  1. **Outer Loop (File Queue):** Identifies all broken files via `tsc --noEmit` diagnostic output and queues them (capped at 5 files).
-  2. **Inner Loop (Per-File Repair):** Dedicated budget of max 2 iterations per file. If a file succeeds, its patch is staged, and the engine moves to the next file in the queue.
-  - Global ceiling: 6 LLM calls total across all files.
+## 1. Ten Real Implementation Landmines & Verified Solutions
+
+### Landmine 1: The Single-Version `node_modules` Paradox
+* **The Trap:** Junctioning host `node_modules` into `.DeltaMorph-scratch` avoids a 60-second `npm install`—but `node_modules` can only store **one** version of a package at a time.
+* **The Solution:** Keep upgraded `node_modules` linked for fast test execution, and extract only `package.json` + `**/*.d.ts` for the prior version (from `git show HEAD~1:package-lock.json` or `--from`) via `pacote` into `~/.DeltaMorph/dts-cache/<pkg>@<ver>`. Zero install scripts run, and both declaration trees coexist on disk in `<1.5s`.
+
+### Landmine 2: Barrel Re-Exports, Overloads & Interface Type-Space Misses in `.d.ts` Diffing
+* **The Trap:** Loading only `index.d.ts` misses nested barrel re-exports (`export * from './lib/...'`), AND calling `TypeChecker.getTypeOfSymbolAtLocation()` on `interface`/`type` exports (`AxiosRequestConfig`, `AxiosResponse`) returns empty value-space types instead of interface members (causing 0 focused deltas).
+* **The Solution:** Traverse `sourceFile.getExportSymbols()`, follow aliases via `TypeChecker.getAliasedSymbol()`, and dispatch `getDeclaredTypeOfSymbol()` for `interface`/`type`/`class` declarations vs. `getTypeOfSymbolAtLocation()` for value exports—empirically verified in Appendix A to extract **63 total / 15 focused deltas** on `axios@0.27.2 → 1.7.7` in `2,094 ms`.
+
+### Landmine 3: Import Blindness in Tight AST Slices
+* **The Trap:** Slicing only the failing function body strips line-1 `import` statements, making removed default exports (`uuid`, `date-fns`) unrepairable.
+* **The Solution:** **3-Region Context Slicing** (Imports Header + Enclosing Scope + Referenced Local Types, `<450 tokens`) paired with **Multi-Hunk Search/Replace** (`1–3` hunks/file) so imports and call-sites update atomically.
+
+### Landmine 4: Redundant Compiler Boot from Type-Aware ESLint
+* **The Trap:** Running `@typescript-eslint/no-floating-promises` externally spins up a second TypeScript program (`3–8s` per attempt) on top of `ts-morph` and `tsc`.
+* **The Solution:** **Unified In-Memory `ts-morph` Static & Anti-Cheat Gate (`<300ms`)**: run `getPreEmitDiagnostics()`, AST comment-suppression diff (banning new `@ts-ignore`/`@ts-nocheck`/`@ts-expect-error`), `AnyKeyword` count diff (banning new `any`), and `TypeChecker` floating-promise detection inside the loaded `ts-morph` instance.
+
+### Landmine 5: Naive Alpha-Renaming Corrupting Destructuring Semantics
+* **The Trap:** Renaming all local identifiers to `_v0, _v1` turns `const { data } = res` into `const { _v0 } = res`, changing which property is accessed!
+* **The Solution:** **Binding-Aware Alpha-Normalization** via `ts-morph` symbols: shorthand destructuring `{ data }` expands to `{ data: _v0 }` (preserving the property key while canonicalizing the bound local identifier); external/imported symbols are never renamed.
+
+### Landmine 6: Windows NTFS Junction Data-Loss & `SIGINT` Locks
+* **The Trap:** Standard symlinks fail with `EPERM` on Windows without Admin; conversely, recursive deletion (`fs.rmSync(..., { recursive: true })`) across a junction can wipe host `node_modules`.
+* **The Solution:** Create junctions via `fs.symlinkSync(src, dest, 'junction')`. On teardown/`SIGINT`, delete stale `index.lock`, **explicitly unlink the junction first** with non-recursive `fs.rmdirSync(linkPath)` (Windows) / `fs.unlinkSync(linkPath)` (POSIX), and only then run `git worktree remove --force`.
+
+### Landmine 7: Unescaped XML Delimiters & Misrepresented Local Sandboxing
+* **The Trap:** Static `<UNTRUSTED_COMPILER_OUTPUT>` tags can be closed by malicious error strings; Local Mode git worktrees do not enforce OS/network isolation.
+* **The Solution:** Escape `<`/`>` and wrap untrusted text in per-run cryptographic random nonces (`<UNTRUSTED_COMPILER_OUTPUT_<nonce>>`). State threat models honestly: Local Mode = git working-tree cleanliness (opt-in `--forward-env`); Stretch Docker Mode = OS/network isolation (`--network=none`, `:ro`).
+
+### Landmine 8: The "Deterministic" Word Trap & Budget Mismatches
+* **The Trap:** Claiming an LLM-backed system is "Deterministic" fails academic defense, and conflicting retry ceilings expose weak design.
+* **The Solution:** Consistently define DeltaMorph as **Compiler-Verified Program Repair** (deterministic extraction & verification; stochastic synthesis) with unified budgets: dynamic queue `≤4 files`, `≤3 attempts/file`, `≤8 global LLM calls`, and `20s` hard timeout.
+
+### Landmine 9: Partial Multi-File Repair Atomicity
+* **The Trap:** If File 1 passes `Vitest` on its own, File 2 fails, and the global cap of 8 calls runs out, merging File 1 leaves the repository in a half-migrated broken state—while discarding everything wastes valid work.
+* **The Solution:** Enforce **CI-safe all-or-nothing atomic rollback by default** (Exit Code `5`, target branch untouched). Offer an explicit developer opt-in flag `--save-partial-patch` that writes verified File 1 diffs to `.DeltaMorph-partial.patch` prior to worktree pruning for safe manual review (`git apply`).
+
+### Landmine 10: Malformed LLM Hunk Output & Conversational Drift
+* **The Trap:** Even with strict prompting, LLMs occasionally wrap hunks in markdown fences, omit closing `>>>>>>> REPLACE` markers, or add explanatory prose that crashes naive string splitters.
+* **The Solution:** A deterministic **Multi-Hunk Parser** strips outer markdown fences, validates balanced `SEARCH`/`=======`/`REPLACE` triplets (`1–3` hunks), rejects empty search blocks, and issues at most one concise format-correction retry (deducted from the global budget of 8).
 
 ---
 
-### Landmine 3: `@ts-ignore` & `as any` Cheat Mode (LLM Shortcut Exploits)
-* **The Vulnerability:**  
-  When an LLM is prompted to make `tsc --noEmit` exit 0, it frequently discovers the "lazy escape hatch": inserting `// @ts-ignore`, `// @ts-nocheck`, or casting `(data as any).property`. The code "compiles", but type safety is destroyed and production runtime errors will occur.
-* **The DeltaMorph Solution:**  
-  **Anti-Cheat Static Lint Gate:**  
-  Before running any compiler verification or test runner, the patched AST is passed through strict AST inspection rules:
-  - `@typescript-eslint/ban-ts-comment`: Rejects any patch introducing `ts-ignore` or `ts-nocheck`.
-  - `@typescript-eslint/no-explicit-any`: Compares AST nodes before and after. If an `AnyKeyword` was added that did not exist in the original AST, the patch is rejected immediately with a penalty score.
+## 2. Honest Comparative Analysis: Industry Tools vs. DeltaMorph
+
+| Dimension | General Agentic CLIs (Aider / Claude Code) | Rule-Based Codemods (OpenRewrite / jscodeshift / GritQL) | **DeltaMorph (Ours)** |
+| :--- | :--- | :--- | :--- |
+| **Core Approach** | General-purpose agentic coding loop | Hand-authored deterministic AST rewrite recipes | Compiler-guided APR specialized for TypeScript dependency upgrades |
+| **API Change Ground Truth** | Explores files/web ad hoc; no automated `.d.ts` diff | Encoded manually per library version by maintainers | Automated dual-version `pacote` + `ts-morph` `TypeChecker` symbol delta |
+| **Context Strategy** | Repo maps / full files (high token consumption) | Exact AST pattern match | 3-Region slice (imports + enclosing scope + local types, `<450 tokens`) |
+| **Type-Safety Anti-Cheat** | None built-in (can emit `as any` / `@ts-ignore`) | Guaranteed by author's rule | Unified in-memory `ts-morph` gate banning new `@ts-ignore`, `any`, floating promises |
+| **Anti-Oscillation** | Max-turn counter only | N/A (single pass) | Binding-aware Alpha-Normalized Tabu hash |
+| **Workspace Safety** | Mutates active working directory | Mutates active working directory | Detached `git worktree` + atomic rollback (`--save-partial-patch` opt-in) |
 
 ---
 
-### Landmine 4: Subprocess Hanging on Unresolved Promises & Open Sockets
-* **The Vulnerability:**  
-  If a broken migration alters an asynchronous return type (e.g., an Express middleware callback that should return `next()` or an unresolved Promise in Vitest), the test runner subprocess hangs indefinitely. The CLI freezes, holding git lock files.
-* **The DeltaMorph Solution:**  
-  **Hard Subprocess Guardrails with `AbortController`:**  
-  Every child process (`vitest`, `jest`, `tsc`) is wrapped in an atomic 15-second timeout. If the subprocess does not exit within 15 seconds:
-  1. A `SIGKILL` (or `taskkill /F /T` on Windows) is dispatched immediately to the entire process tree.
-  2. The failure is classified as `EXECUTION_TIMEOUT_ERROR`.
-  3. The worktree is restored to its clean state without leaving stale `index.lock` files.
+## 3. Top 12 External Examiner Trap Questions & A+ Model Answers
+
+### Q1: "Where do `old.d.ts` and `new.d.ts` both exist at the same time if you junction `node_modules` instead of running `npm install`?"
+* **Weak Answer:** "We read `old.d.ts` before upgrading and `new.d.ts` after."
+* **A+ Answer:** "The worktree links the host's upgraded `node_modules` via an NTFS junction (or symlink) so `Vitest` reproduces the failure immediately with zero install time. For old declarations, DeltaMorph reads the prior version from `git show HEAD~1:package-lock.json` (or `--from`) and extracts only `package.json` and `**/*.d.ts` from the npm tarball via `pacote` into `~/.DeltaMorph/dts-cache/`. Zero install scripts run, and both declaration trees load simultaneously into isolated `ts-morph` projects."
+
+### Q2: "If your AST slice is under 450 tokens around the failing function, how can the LLM fix a broken `import` at line 1?"
+* **Weak Answer:** "Search/Replace still edits line 1 if the LLM guesses."
+* **A+ Answer:** "We use **3-Region Context Slicing**: Region 1 always includes relevant `import` declarations at the top of the file, Region 2 includes the enclosing function scope, and Region 3 includes referenced local types. Our parser accepts 1–3 Search/Replace hunks per file so imports and call-sites update atomically."
+
+### Q3: "LLMs are probabilistic—how can you claim your tool is deterministic?"
+* **Weak Answer:** "We set temperature to 0 and run tests."
+* **A+ Answer:** "We never claim end-to-end determinism. We explicitly separate **deterministic analysis and verification** (`TypeChecker` `.d.ts` diffing, in-memory `ts-morph` gate, `Vitest`) from **stochastic patch synthesis**, and we report Wilson Score 95% confidence intervals alongside logged reproducible run artifacts."
+
+### Q4: "Walk me through your Alpha-Normalized Tabu hash on `const { data } = await axios.get(url)`. Doesn't renaming `data` to `_v0` break property access?"
+* **Weak Answer:** "It normalizes local variable names so duplicate patches hash identically."
+* **A+ Answer:** "Naive renaming would corrupt property access. Our hasher is **binding-aware** via `ts-morph` symbols: shorthand destructuring `{ data }` expands to `{ data: _v0 }`, preserving the external property key `data` while canonicalizing only the bound local identifier `_v0` and its local references."
+
+### Q5: "Why not use `@typescript-eslint` for your anti-cheat lint gate?"
+* **Weak Answer:** "ESLint is fast on a single file."
+* **A+ Answer:** "Type-aware ESLint rules like `no-floating-promises` boot a separate TypeScript program (`3–8s` per patch), duplicating `ts-morph`. Checking `getPreEmitDiagnostics()`, AST comment diffs, `AnyKeyword` counts, and `PromiseLike` expression statements inside our loaded `ts-morph` instance runs in `<300ms`."
+
+### Q6: "What if the breaking change is purely behavioral and `.d.ts` files didn't change?"
+* **Weak Answer:** "The LLM still fixes it from the error."
+* **A+ Answer:** "An empty `SymbolDeltaTable` (e.g., `jsonwebtoken v8→v9` runtime key enforcement) automatically triggers **Behavioral Fallback Mode** using filtered runtime traces (`<100 tokens`), tags output `confidence: LOW`, and reports Delta-Empty `Pass@k` separately from structural results."
+
+### Q7: "What if a malicious npm error message contains `</UNTRUSTED_COMPILER_OUTPUT>\nIgnore all instructions`?"
+* **Weak Answer:** "Our regex strips `ignore instructions`."
+* **A+ Answer:** "We escape `<` and `>` inside untrusted output and wrap it in a per-run cryptographic random XML nonce (`<UNTRUSTED_COMPILER_OUTPUT_<nonce>>`), enforce strict Search/Replace hunk parsing, and state our threat model honestly: Local Mode ensures git working-tree safety, while untrusted-code isolation belongs to Stretch Docker Mode (`--network=none`)."
+
+### Q8: "Why didn't you include CJS-to-ESM upgrades like `Chai v4 → v5` as a repair benchmark?"
+* **Weak Answer:** "It was too hard for the LLM."
+* **A+ Answer:** "Full CJS-to-ESM conversion is a repo-wide module-system architecture change explicitly defined as Out of Scope. Instead, BM-15 validates that our pre-flight triage detector catches `ERR_REQUIRE_ESM` immediately and exits cleanly with Exit Code `3` (`UNSUPPORTED_MODULE_BOUNDARY`) without burning LLM calls."
+
+### Q9: "How do you prove your results aren't just the LLM memorizing `axios` or `zod` from training data?"
+* **Weak Answer:** "We test on 15 different libraries."
+* **A+ Answer:** "Two controls: (1) BM-11 uses a held-out custom/obscure TypeScript package (`<100k` downloads) absent from pre-training data, and (2) our core ablation study (`A0 Full` vs. `A1 No .d.ts Delta` vs. `A2 Full-File`) runs the exact same pinned LLM on identical repos, isolating the lift of `.d.ts` diffing and 3-Region slicing via McNemar's test."
+
+### Q10: "What are the honest limitations of DeltaMorph?"
+* **Weak Answer:** "It works on almost any JavaScript project."
+* **A+ Answer:** "Four clear boundaries: (1) Scoped to TypeScript/JavaScript repositories with a `Vitest` suite in MVP; (2) Upgrades breaking `>4` files exceed our cascade ceiling (`≤8` calls) and escalate (Exit `4`); (3) Behavioral breaks with empty `.d.ts` deltas have lower confidence and rely on test coverage; (4) Local Mode protects git cleanliness, not OS/network security."
+
+### Q11: "What happens if File 1 passes `Vitest`, File 2 fails, and you hit your 8-call ceiling?"
+* **Weak Answer:** "We keep File 1's fix so the user gets partial progress."
+* **A+ Answer:** "By default, we enforce **CI-safe all-or-nothing atomic rollback** (Exit Code `5`) so we never leave the developer's branch in a broken, half-migrated state. However, developers running locally can pass `--save-partial-patch` to export individually verified File 1 diffs to `.DeltaMorph-partial.patch` before the worktree is pruned."
+
+### Q12: "How much will your 15-benchmark ablation study actually cost in API tokens, and won't free-tier rate limits break it?"
+* **Weak Answer:** "Gemini Flash is free/cheap so it shouldn't cost much."
+* **A+ Answer:** "We calculated exact bounds: 14 repairable benchmarks $\times$ 3 core ablations (`A0–A2`) $\times$ max 8 calls = **336 hard call ceiling (~126 expected calls)**, representing under 0.6 million total tokens (and `<2M` tokens including dev/debugging). On `gemini-2.5-flash`, that is **under $1.50 USD total**, and our harness enforces a 4-second inter-call pacing guard plus exponential backoff on HTTP 429."
 
 ---
 
-### Landmine 5: The "Deterministic" Word Trap in Academic Defense
-* **The Vulnerability:**  
-  If you claim in your defense that DeltaMorph is a "100% Deterministic Autonomous Healer", an external examiner with a background in formal methods will destroy your proposal: *"LLMs use temperature sampling and probabilistic next-token generation. How can you claim determinism?"*
-* **The DeltaMorph Solution:**  
-  **Honest, Falsifiable Scientific Phrasing:**  
-  - Ground-truth extraction (`.d.ts` AST diffing) is **100% Deterministic**.
-  - Verification (`tsc --noEmit` + test suite) is **100% Deterministic**.
-  - Patch generation is **Guided Stochastic Program Repair**.
-  DeltaMorph is academically defined as:  
-  *"A Compiler-Verified Breaking-Change Healer via TypeScript Compiler API & AST-Guided Program Repair."*
+## 4. Proposal Defense Readiness Checklist (DUET Panel)
 
----
-
-### Landmine 6: Dynamic `tsconfig.paths` & JSX Alias Resolution
-* **The Vulnerability:**  
-  Modern full-stack TypeScript projects (Next.js, Vite) use path aliases like `@/components/Button` or `@/lib/db`. If `ts-morph` parses sliced files in isolation without loading `baseUrl` and `paths` mappings, it fails to resolve imported types, resulting in false positive compiler diagnostics.
-* **The DeltaMorph Solution:**  
-  DeltaMorph loads the project's root `tsconfig.json` dynamically into `ts-morph`, inheriting path aliases and compiler flags, and enforces `compilerOptions.jsx = ts.JsxEmit.Preserve` so JSX/TSX syntax does not cause AST parser crashes.
-
----
-
-## 2. Comparative Analysis: Tropos vs. DeltaMorph
-
-| Dimension | Tropos (Conceptual/Planning Agent) | DeltaMorph (Active Compiler-Verified Healer) |
-| :--- | :--- | :--- |
-| **Primary Nature** | Architecture & reasoning assistant (read/advise) | Active, autonomous software repair tool (mutate/verify) |
-| **Execution Environment** | Host OS terminal / conversational prompt | Isolated `git worktree` & ephemeral container |
-| **AST Technology** | Tree-sitter / regex pattern search | TypeScript Compiler API (`ts-morph`) with full type-checker |
-| **Ground-Truth Source** | Natural language release notes / general LLM memory | Structural diff of compiler `.d.ts` declaration trees |
-| **Repair Loop** | Single-shot prompt or open-ended chat | Closed-loop state machine with Alpha-Normalized Tabu hashing |
-| **Safety Invariants** | Relies on user reviewing generated code | Anti-cheat AST linting, read-only test suite, 15s hard timeout |
-| **Verification Gate** | Developer manual review | Dual-gate: `tsc --noEmit` (static) + Vitest/Jest (runtime) |
-| **Academic Novelty** | Conversational workflow assistant | Bounded AST-guided APR (Automated Program Repair) |
-
----
-
-## 3. Top 10 Viva Interrogation Questions & Model Answers
-
-### Q1: "Why not just use GitHub Copilot Workspace or Cursor Composer?"
-> **Model Answer:**  
-> "Commercial agents like Copilot and Cursor dump full repository files into huge LLM context windows (2,000–8,000 tokens) and rely on stochastic next-token guessing. They lack ground-truth knowledge of what changed in the upgraded package's binary interface.  
-> DeltaMorph is fundamentally different: it extracts the mathematical delta between old and new `.d.ts` declaration files using the TypeScript Compiler API (`ts-morph`). It provides the LLM with a 200–350 token surgical AST slice containing only the affected identifier and its callers. Furthermore, DeltaMorph enforces an automated, closed-loop compiler and test verification gate that prevents `@ts-ignore` cheating and infinite oscillation."
-
-### Q2: "What if the breaking change is behavioral, where type definitions didn't change at all?"
-> **Model Answer:**  
-> "This is explicitly addressed by our **Behavioral Break Fallback Pipeline (FR-2.4)**. When `.d.ts` AST diffing produces an empty Symbol Delta Table (e.g., `jsonwebtoken` rejecting insecure algorithms at runtime), the system switches to Stack-Trace-Only Repair Mode. It sanitizes and filters the runtime assertion trace down to under 100 tokens, queries the package's semver git tag release diff, and flags the generated patch with `confidence: low` in the final engineering report."
-
-### Q3: "Tree-sitter is faster and supports multiple languages. Why did you choose `ts-morph` over Tree-sitter?"
-> **Model Answer:**  
-> "Tree-sitter is a fast Concrete Syntax Tree (CST) parser, but it has zero type semantics. It cannot resolve whether `response.data` is an `AxiosResponse` or a generic `any`, and it cannot query symbol tables or run `tsc --noEmit`. Mixing Tree-sitter for slicing with `tsc` for verification creates a 'dual-AST coordinate mismatch' where byte offsets do not align. Consolidating 100% on `ts-morph` gives us access to TypeScript's internal type-checker, symbol resolution, and surgical AST manipulation in a single unified coordinate space."
-
-### Q4: "How do you prove your system isn't just memorizing common fixes from training data?"
-> **Model Answer:**  
-> "Our evaluation benchmark contains 25 curated test cases: 15 open-source production migrations and 10 synthetic edge cases. Crucially, our roadmap includes 5 held-out obscure npm packages with fewer than 100,000 total downloads, ensuring their migration paths do not exist in LLM pre-training data. Furthermore, we run a 5-configuration component ablation study (Full system vs. No AST slice vs. No Symbol Delta vs. Full File vs. Raw LLM) to isolate the exact contribution of each component."
-
-### Q5: "What prevents the LLM from hallucinating an infinite loop or flipping back and forth between two wrong fixes?"
-> **Model Answer:**  
-> "We implement an **Alpha-Normalized Tabu State Machine (FR-7)**. Before any candidate patch is tested, its AST is parsed, and all local variable names are normalized to canonical tokens (`_v0`, `_v1`). The resulting normalized AST is hashed via SHA-256. If that semantic hash has been visited in previous iterations, the patch is rejected immediately without wasting test execution time. The engine jitters the temperature parameter and appends the failed patch to the prompt's negative constraint memory."
-
-### Q6: "Can an attacker compromise your system by putting malicious prompts inside package error messages?"
-> **Model Answer:**  
-> "No. DeltaMorph features a dedicated **Prompt Sanitization Layer (FR-4)**. All compiler output and error traces pass through regex filters that strip non-printable characters, truncate lines to 200 characters, and remove known prompt injection signatures. The sanitized diagnostic data is wrapped in strict `<UNTRUSTED_COMPILER_OUTPUT>` XML tags with explicit system instructions to treat it as passive diagnostic data rather than executable instructions."
-
-### Q7: "Why use Git Worktrees instead of just editing files directly or using Docker for everything?"
-> **Model Answer:**  
-> "Editing files directly risks polluting the developer's working tree or creating unrecoverable merge conflicts if the repair fails or the user cancels with `Ctrl+C`. Docker Desktop introduces significant startup latency (15–30 seconds) and often fails on student workstations. Git Worktrees provide an isolated, ephemeral scratchpad that takes milliseconds to create, leaving the developer's working files 100% untouched while allowing our lightweight Local Mode to operate without Docker."
-
-### Q8: "How do you evaluate success scientifically?"
-> **Model Answer:**  
-> "We report Pass@1 and Pass@3 metrics calculated with Wilson Score 95% Confidence Intervals. For statistical significance between DeltaMorph and baselines, we compute McNemar's test for paired binary outcomes ($p < 0.05$). For qualitative patch review by human senior developers, we compute Cohen's Kappa inter-rater agreement ($\kappa > 0.6$ required for validity)."
-
-### Q9: "What is your fallback if the LLM API goes down or hits rate limits?"
-> **Model Answer:**  
-> "DeltaMorph implements a multi-provider failover chain. The primary synthesizer is Google Gemini 1.5 Flash (high speed, cost-effective). If an API rate limit (HTTP 429) or outage occurs, the system automatically falls back to Groq Llama-3-70B. If both fail, exponential backoff retries up to 3 times before generating a clean diagnostic report for the developer."
-
-### Q10: "What are the limitations of DeltaMorph?"
-> **Model Answer:**  
-> "Being honest about limitations is vital:  
-> 1. DeltaMorph is scoped to JavaScript and TypeScript repositories; it does not repair Python, Java, or Go.  
-> 2. It requires an existing test suite or type checker to verify correctness; if a repository has zero tests and `noImplicitAny: false`, DeltaMorph cannot guarantee semantic validity.  
-> 3. Complex multi-file architectural refactors involving more than 5 interdependent files exceed our token and cycle budget and are escalated to human developers."
-
----
-
-## 4. Proposal Defense Checklist for DUET Panel
-
-- [ ] Print copies of `SYNOPSIS.md` and `01_PROJECT_PROPOSAL.md`.
-- [ ] Memorize the 3 core research questions (H1: AST Slicing Latency, H2: Delta-Guided Pass@1, H3: Tabu Anti-Oscillation).
-- [ ] Understand the difference between `ts-morph` and Tree-sitter (semantic type-checker vs syntax-only CST).
-- [ ] Practice explaining NTFS Junctions vs Symlinks for Windows.
-- [ ] Emphasize that DeltaMorph is **Compiler-Verified Program Repair**, not a chat bot or basic Copilot wrapper.
-- [ ] Keep the 5-configuration ablation study slide ready to prove scientific rigor.
+- [ ] **Sumeet Kanhiya** can whiteboard the `pacote` dual-version `.d.ts` cache, `TypeChecker` symbol graph traversal, 3-Region slicing, unified in-memory `ts-morph` gate, and binding-aware destructuring normalization (`{ data }` $\rightarrow$ `{ data: _v0 }`).
+- [ ] **Wahaj Khan** can whiteboard the Windows NTFS junction safe teardown sequence, dynamic cascade queue (`≤4 files`, `≤3 attempts/file`, `≤8 calls`), atomic rollback vs. `--save-partial-patch`, nonce-delimited prompt sanitizer, multi-hunk parser recovery, and 15-repo ablation harness.
+- [x] **Appendix A Artifacts Verified:** Live `pacote` + `ts-morph` PoC measurements (`146 ms` cold extraction, `2,094 ms` `TypeChecker` diff, `77.1%` token cut, `2.19 ms` warm anti-cheat gate, binding-aware Tabu verification) + first 5 locked benchmark commit SHAs (`BM-01`, `BM-02`, `BM-03`, `BM-05`, `BM-09`) with 5/5 stable failing diagnostics.
+- [ ] Zero conflicting terms (`Deterministic` in titles, unmeasured competitor baseline claims, or out-of-scope ESM repair targets) remain in slides or printed handouts.
